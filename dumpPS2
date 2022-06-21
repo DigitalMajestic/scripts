@@ -1,0 +1,93 @@
+#! /bin/zsh
+
+RED="\e[1;91m"
+GREEN="\e[1;32m"
+NOCOLOR="\e[0m"
+
+reply=Y
+
+cd "$(dirname "$0")" # if we execute from a shortcut, put us wherever the script actually is
+
+echo "${RED}This requires installing cdrdao and grep from Macports\n${NOCOLOR}"
+
+# # Check to see if the disk is mounted
+echo "Waiting for disk to be ready..."
+while true; do
+	if mount | grep 'cd' | cut -c 1-14 | ggrep -oP '.+?[0-3](?=\s)' &>/dev/null
+	then break
+	else sleep 1; continue
+	fi
+done
+
+disk=$(mount | grep 'cd' | ggrep -oP '.+?[0-3](?=\s)') # run mount, find any lines that have 'cd' in them, and make $disk equal to the beginning of that line up until a number followed by whitespace, excluding the space
+rawdisk=$(mount | grep 'cd' | cut -c 1-10) # we need this to send the eject command if we're using a CD
+
+# Check to see if the volume name has appeared, we need this to name the dump file
+diskutil mount $disk 2>&1 1>/dev/null
+while true; do
+	if diskutil info $disk 2>&1 1>/dev/null | grep "Volumes" 2>&1 1>/dev/null
+	then echo "Disk ready!\n"; break
+	else sleep 1; continue
+	fi
+done
+
+# set the game name from the name of the disk itself, basically mimicking imgburn; needs to be done AFTER the disk is mounted
+gamename=$(diskutil info $disk | grep 'Mount Point:' | cut -c 40-70)
+gamesize=$(diskutil info $disk | grep 'Disk Size:' | cut -c 31-40 | ggrep -oP '.+?[A-Z](?=\s)')
+
+dumpDVD()
+{
+	#if the file already exists, ask the user if they want to proceed
+	if [[ -f $gamename.iso ]]
+	then echo -n "$gamename.iso already exists! Overwrite? Y/n: "; read -q REPLY
+		if [[ $REPLY =~ ^[Yy] ]]
+		then rm -f $gamename.iso; echo ""
+		else echo "\nExiting\n"; exit 1
+		fi
+	fi
+	
+	echo "Game name will be $GREEN${gamename}.iso$NOCOLOR"
+	echo "Game size is $GREEN${gamesize}$NOCOLOR"
+	echo "Game will be in $GREEN$(pwd)$NOCOLOR"
+	echo "Dumping! This takes a while...\n"
+
+	diskutil unmount $disk &>/dev/null # unmount the disk so we can actually access it
+	dd if=$disk of=${gamepath}$gamename.iso status=progress
+	diskutil eject $disk # &>/dev/null
+	
+	echo "\nCalculating MD5...\n"
+	MD5 $gamename.iso
+}
+
+dumpCD()
+{
+	#if the file already exists, ask the user if they want to overwrite and proceed
+	if [[ -f $gamename.bin ]]
+	then echo -n "$gamename.bin already exists! Overwrite? Y/n: "; read -q REPLY
+		if [[ $REPLY =~ ^[Yy] ]]
+		then rm -f $gamename.bin && rm -f $gamename.cue; echo ""
+		else echo "\nExiting\n"; exit 1
+		fi
+	fi
+	
+	echo "Game name will be $GREEN${gamename}.bin$NOCOLOR"
+	echo "Game size is $GREEN${gamesize}$NOCOLOR"
+	echo "Game will be in $GREEN$(pwd)$NOCOLOR"
+	echo "Dumping! This takes a while...\n"
+	
+	diskutil unmountDisk $disk &>/dev/null
+	diskCD=$(cdrdao scanbus |& ggrep -oP '.+?(?=\s:)')
+	cdrdao read-cd --device $diskCD --read-raw --datafile $gamename.bin $gamename.cue
+	sleep 3
+	diskutil eject $rawdisk # &>/dev/null
+	
+	echo "\nCalculating MD5...\n"
+	MD5 $gamename.bin
+}
+
+if mount | grep "s0" &>/dev/null # only CDs use s0, DVDs don't, as far as I can tell. This might break?
+then dumpCD
+else dumpDVD
+fi
+
+tput bel # ring a ding ding
