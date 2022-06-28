@@ -8,7 +8,11 @@ reply=Y
 
 cd "$(dirname "$0")" # if we execute from a shortcut, put us wherever the script actually is
 
-echo "${RED}This requires installing cdrdao and grep from Macports\n${NOCOLOR}"
+# i cannot for the life of me get this to work with the ! op, so we do it this way
+if $(man cdrdao &>/dev/null) && $(man ggrep &>/dev/null)
+then echo ""
+else echo "${RED}This requires installing cdrdao and grep from Macports\n${NOCOLOR}"; exit 1
+fi
 
 # # Check to see if the disk is mounted
 echo "Waiting for disk to be ready..."
@@ -31,7 +35,7 @@ while true; do
 	fi
 done
 
-# set the game name from the name of the disk itself, basically mimicking imgburn; needs to be done AFTER the disk is mounted
+# set the game name from the name of the disk itself, mimicking imgburn; needs to be done AFTER the disk is mounted
 gamename=$(diskutil info $disk | grep 'Mount Point:' | cut -c 40-70)
 gamesize=$(diskutil info $disk | grep 'Disk Size:' | cut -c 31-40 | ggrep -oP '.+?[A-Z](?=\s)')
 
@@ -53,7 +57,15 @@ dumpDVD()
 
 	diskutil unmount $disk &>/dev/null # unmount the disk so we can actually access it
 	dd if=$disk of=${gamepath}$gamename.iso status=progress
-	diskutil eject $disk # &>/dev/null
+	
+	# unfortunately necessary; attempt to eject the disk repeatedly until it works
+	echo "Ejecting disk..."
+	while true; do
+		if diskutil eject $disk &>/dev/null
+		then break
+		else sleep 1; continue
+		fi
+	done
 	
 	echo "\nCalculating MD5...\n"
 	MD5 $gamename.iso
@@ -78,8 +90,18 @@ dumpCD()
 	diskutil unmountDisk $disk &>/dev/null
 	diskCD=$(cdrdao scanbus |& ggrep -oP '.+?(?=\s:)')
 	cdrdao read-cd --device $diskCD --read-raw --datafile $gamename.bin $gamename.cue
-	sleep 3
-	diskutil eject $rawdisk # &>/dev/null
+	
+	# unfortunately necessary; attempt to eject the disk repeatedly until it works
+	echo "Ejecting disk..."
+	while true; do
+		if diskutil eject $rawdisk &>/dev/null
+		then break
+		else sleep 1; continue
+		fi
+	done
+	
+	#diskutil unmountDisk $disk #&>/dev/null
+	#diskutil eject $rawdisk #&>/dev/null
 	
 	echo "\nCalculating MD5...\n"
 	MD5 $gamename.bin
